@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Kitchen Awnings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="/style.css">
+  </head>
+  <body>
+    <div style="display: flex; justify-content: center; margin-bottom: 1em">
+      <h1>Kitchen Awnings</h1>
+    </div>
+
+    <!-- Battery info -->
+    <div style="display: flex; color: lightgrey; justify-content: center; margin-bottom: 2em">
+      <span>Battery Voltage: <span id="batteryVoltage">-</span> V</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>Battery Current: <span id="batteryCurrent">-</span> mA</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+      <span>PV Current: <span id="pvCurrent">-</span> mA</span>
+    </div>
+
+    <!-- Control buttons -->
+    <div style="display: flex; justify-content: center;">
+      <table style="table-layout: fixed;">
+        <tr>
+          <td><button class="button" id="up0" onclick="buttonClick(this)">UP</button></td>
+          <td><button class="button" id="up1" onclick="buttonClick(this)">UP</button></td>
+        </tr>
+        <tr>
+          <td><button class="button" id="stop0" onclick="buttonClick(this)">STOP</button></td>
+          <td><button class="button" id="stop1" onclick="buttonClick(this)">STOP</button></td>
+        </tr>
+        <tr>
+          <td><button class="button" id="down0" onclick="buttonClick(this)">DOWN</button></td>
+          <td><button class="button" id="down1" onclick="buttonClick(this)">DOWN</button></td>
+        </tr>
+        <tr>
+          <td style="text-align: center; color: lightgrey; padding-top: 1em;">
+            <span id="reason0">Power-on</span>
+          </td>
+          <td style="text-align: center; color: lightgrey; padding-top: 1em;">
+            <span id="reason1">Power-on</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="text-align: center; color: lightgrey; padding-bottom: 1em;">
+            <span id="moveTime0">00:00h</span>
+          </td>
+          <td style="text-align: center; color: lightgrey; padding-bottom: 1em;">
+            <span id="moveTime1">00:00h</span>
+          </td>
+        </tr>
+        <tr>
+          <td class="awning-container">
+            <div class="awning">
+              <div class="rectangle">
+                <div class="fill" id="fill0"></div>
+              </div>
+            </div>
+          </td>
+          <td class="awning-container">
+            <div class="awning">
+              <div class="rectangle">
+                <div class="fill" id="fill1"></div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <hr style="margin-top: 5em;">
+
+    <!-- Automatic Day/Night -->
+    <div style="display: flex; justify-content: center;">
+      <span style="margin-bottom: 1em; margin-top: 1em">Automatic Day / Night</span>
+    </div>
+    <div style="display: flex; justify-content: center;margin-bottom: 1em;">
+      <label class="switch">
+        <input type="checkbox" id="toggleSwitch">
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <div style="display: flex; justify-content: center; align-items: center; font-size: 2em">
+      <input class="time" type="number" id="morningHour">
+      <span>:</span>
+      <input class="time" type="number" id="morningMinute">
+      <span style="margin-left:1%; margin-right:5%">h</span>
+      <input class="time" type="number" id="nightHour">
+      <span>:</span>
+      <input class="time" type="number" id="nightMinute">
+      <span style="margin-left:1%;">h</span>
+    </div>
+
+    <div style="display: flex; justify-content: center; align-items: center;">
+      <button class="button-save" id="saveTime">SAVE</button>
+    </div>
+
+    <hr style="margin-top: 5em;">
+    <span style="display: flex; justify-content: center; margin-top: 1em">
+      Use these buttons to set the current position as the end of the awning
+    </span>
+    <div style="display: flex; justify-content: center; margin-top: 2em">
+      <table style="table-layout: fixed;">
+        <tr>
+          <td><button class="button" id="end0" onclick="configure('end0')">Configure</button></td>
+          <td><button class="button" id="save0" onclick="configure('save0')" hidden>SAVE</button></td>
+          <td><button class="button" id="end1" onclick="configure('end1')">Configure</button></td>
+          <td><button class="button" id="save1" onclick="configure('save1')" hidden>SAVE</button></td>
+        </tr>
+      </table>
+    </div>
+
+    <hr style="margin-top: 1em;">
+    <span style="display: flex; justify-content: center; margin-top: 1em">
+      Use this button to reset the home position
+    </span>
+    <div style="display: flex; justify-content: center; margin-top: 2em">
+      <table style="table-layout: fixed;">
+        <tr>
+          <td><button class="button" id="home" onclick="home()">HOME</button></td>
+        </tr>
+      </table>
+    </div>
+
+    <hr style="margin-top: 1em;">
+    <div style="display: flex; justify-content: center;">
+      <span style="margin-bottom: 1em; margin-top: 1em">WiFi Configuration</span>
+    </div>
+
+    <div style="display: flex; justify-content: center; font-size: 2em">
+      <input style="margin-right: 1em; height: 3em; border-radius: 0.5em; text-align: center" placeholder="SSID" id="ssid">
+      <input style="margin-left: 1em; border-radius: 0.5em; text-align: center" placeholder="Password" type="password" id="password">
+    </div>
+
+    <div style="display: flex; justify-content: center;">
+      <span style="margin-bottom: 1em; margin-top: 1em">IP Address: <span id="ipAddress">192.168.1.155</span></span>
+    </div>
+
+    <div style="display: flex; justify-content: center;">
+      <button class="button-save" style="margin-top:0" id="saveWifi" onclick="saveWifi()">SAVE</button>
+    </div>
+
+    <script>
+      const awningPosition = [0, 0];
+      const distance = [0, 0];
+      const direction = ["up", "up"];
+      const awningAnimation = [null, null];
+
+      function buttonClick(button) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/move");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ buttonId: button.id }));
+
+        const index = button.id.slice(-1);
+        if (button.id.startsWith("up")) {
+            document.getElementById("reason" + index).textContent = "Remote Button";
+            direction[index] = "up";
+            startAnimation("fill" + index);
+        } else if (button.id.startsWith("down")) {
+            document.getElementById("reason" + index).textContent = "Remote Button";
+            direction[index] = "down";
+            startAnimation("fill" + index);
+        } else if (button.id.startsWith("stop")) {
+            cancelAnimation(index);
+        }
+    }
+
+      function configure(buttonId) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/setEndPosition");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ buttonId: buttonId }));
+      }
+
+      function home() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/setHome");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({}));
+      }
+
+      function saveWifi() {
+        var ssid = document.getElementById("ssid").value;
+        var password = document.getElementById("password").value;
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/saveWifi");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ ssid, password }));
+      }
+
+      // animate fill from current percentage
+      function startAnimation(id) {
+          const index = parseInt(id.slice(-1));
+          const fillElement = document.getElementById(id);
+          cancelAnimation(index);
+
+          const speed = 0.05; // % per frame, adjust for faster/slower
+
+          function animate() {
+              if (direction[index] === "down") {
+                  awningPosition[index] += speed;
+                  if (awningPosition[index] > 100) awningPosition[index] = 100;
+              } else if (direction[index] === "up") {
+                  awningPosition[index] -= speed;
+                  if (awningPosition[index] < 0) awningPosition[index] = 0;
+              }
+
+              fillElement.style.transform = `scaleY(${awningPosition[index]/100})`;
+
+              if ((direction[index] === "down" && awningPosition[index] < 100) ||
+                  (direction[index] === "up" && awningPosition[index] > 0)) {
+                  awningAnimation[index] = requestAnimationFrame(animate);
+              } else {
+                  awningAnimation[index] = null;
+              }
+          }
+
+          animate();
+      }
+
+      function cancelAnimation(index) {
+          if (awningAnimation[index]) {
+              cancelAnimationFrame(awningAnimation[index]);
+              awningAnimation[index] = null;
+          }
+      }
+
+
+      async function fetchData() {
+        try {
+          const response = await fetch("/data");
+          if (!response.ok) throw new Error("Network response not ok");
+          const data = await response.json();
+
+          // update DOM
+          document.getElementById("batteryVoltage").textContent = data.batteryVoltage;
+          document.getElementById("batteryCurrent").textContent = data.batteryCurrent;
+          document.getElementById("pvCurrent").textContent      = data.pvCurrent;
+
+          // update awning positions from server
+          awningPosition[0] = data.awning0Percent; // expect 0-100
+          awningPosition[1] = data.awning1Percent;
+          distance[0] = data.dist0;
+          distance[1] = data.dist1;
+          
+          let reverse0 = false;
+          let reverse1 = false;
+
+          if (distance[0] < 0 && direction[0] == "down") {
+            direction[0] == "up";
+            reverse0 = true;
+          }
+          if (distance[0] > 0 && direction[0] == "up") {
+            direction[0] == "down";
+            reverse0 = true;
+          }
+
+          if (distance[1] < 0 && direction[1] == "down") {
+            direction[1] == "up";
+            reverse1 = true;
+          }
+          if (distance[1] > 0 && direction[1] == "up") {
+            direction[1] == "down";
+            reverse1 = true;
+          }
+
+          // immediately reflect in fill elements
+          if (distance[0] == 0 || reverse0) {
+            document.getElementById("fill0").style.transform = `scaleY(${awningPosition[0]/100})`;
+            if (distance[0] == 0) {
+              cancelAnimation(0);
+            }
+          }
+          if (distance[1] == 0 || reverse1) {
+            document.getElementById("fill1").style.transform = `scaleY(${awningPosition[1]/100})`;
+            if (distance[1] == 0) {
+              cancelAnimation(1);
+            }
+          }
+          
+
+        } catch (err) {
+          console.error("Fetch error:", err);
+        }
+      }
+
+      // Update every 2 seconds
+      setInterval(fetchData, 2000);
+
+      // Fetch once immediately on page load
+      fetchData();
+
+      let originalConfig = {};  // store original values from server
+
+      async function fetchConfig() {
+        try {
+          const response = await fetch("/config");
+          if (!response.ok) throw new Error("Network response not ok");
+          const config = await response.json();
+
+          // Save reference for change detection
+          originalConfig = {
+            automaticDayNight: !!config.automaticDayNight,
+            morningHour: config.morningHour,
+            morningMinute: config.morningMinute,
+            nightHour: config.nightHour,
+            nightMinute: config.nightMinute
+          };
+
+          // Fill UI
+          document.getElementById("toggleSwitch").checked = originalConfig.automaticDayNight;
+          document.getElementById("morningHour").value    = String(originalConfig.morningHour).padStart(2, "0");
+          document.getElementById("morningMinute").value  = String(originalConfig.morningMinute).padStart(2, "0");
+          document.getElementById("nightHour").value      = String(originalConfig.nightHour).padStart(2, "0");
+          document.getElementById("nightMinute").value    = String(originalConfig.nightMinute).padStart(2, "0");
+
+          hideSaveButton(); // reset save button
+        } catch (err) {
+          console.error("Fetch config error:", err);
+        }
+      }
+
+      function checkForChanges() {
+        const current = {
+          automaticDayNight: document.getElementById("toggleSwitch").checked,
+          morningHour: parseInt(document.getElementById("morningHour").value) || 0,
+          morningMinute: parseInt(document.getElementById("morningMinute").value) || 0,
+          nightHour: parseInt(document.getElementById("nightHour").value) || 0,
+          nightMinute: parseInt(document.getElementById("nightMinute").value) || 0
+        };
+
+        // Compare JSON representations
+        if (JSON.stringify(current) !== JSON.stringify(originalConfig)) {
+          showSaveButton();
+        } else {
+          hideSaveButton();
+        }
+      }
+
+      function showSaveButton() {
+        document.getElementById("saveTime").hidden = false;
+      }
+      function hideSaveButton() {
+        document.getElementById("saveTime").hidden = true;
+      }
+
+      async function saveConfig() {
+        const newConfig = {
+          scheduled: document.getElementById("toggleSwitch").checked ? 1 : 0,
+          morningHour: parseInt(document.getElementById("morningHour").value) || 0,
+          morningMinute: parseInt(document.getElementById("morningMinute").value) || 0,
+          nightHour: parseInt(document.getElementById("nightHour").value) || 0,
+          nightMinute: parseInt(document.getElementById("nightMinute").value) || 0
+        };
+
+        try {
+          const response = await fetch("/saveConfig", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newConfig)
+          });
+          if (!response.ok) throw new Error("Save failed");
+
+          // Refresh originalConfig and hide save button
+          originalConfig = { ...newConfig, automaticDayNight: !!newConfig.scheduled };
+          hideSaveButton();
+        } catch (err) {
+          console.error("Save error:", err);
+        }
+      }
+
+      // Hook change detection
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchConfig(); // load initial config
+
+        document.getElementById("toggleSwitch").addEventListener("change", checkForChanges);
+        document.getElementById("morningHour").addEventListener("input", checkForChanges);
+        document.getElementById("morningMinute").addEventListener("input", checkForChanges);
+        document.getElementById("nightHour").addEventListener("input", checkForChanges);
+        document.getElementById("nightMinute").addEventListener("input", checkForChanges);
+
+        document.getElementById("saveTime").addEventListener("click", saveConfig);
+      });
+    </script>
+  </body>
+</html>
