@@ -11,7 +11,7 @@
     </div>
 
     <!-- Battery info -->
-    <div style="display: flex; color: lightgrey; justify-content: center; margin-bottom: 2em">
+    <div class="top-info">
       <span>Battery Voltage: <span id="batteryVoltage">-</span> V</span>&nbsp;&nbsp;|&nbsp;&nbsp;
       <span>Battery Current: <span id="batteryCurrent">-</span> mA</span>&nbsp;&nbsp;|&nbsp;&nbsp;
       <span>PV Current: <span id="pvCurrent">-</span> mA</span>
@@ -80,25 +80,78 @@
       </label>
     </div>
 
-    <div style="display: flex; justify-content: center; align-items: center; font-size: 2em">
-      <input class="time" type="number" id="morningHour">
-      <span>:</span>
-      <input class="time" type="number" id="morningMinute">
-      <span style="margin-left:1%; margin-right:5%">h</span>
-      <input class="time" type="number" id="nightHour">
-      <span>:</span>
-      <input class="time" type="number" id="nightMinute">
-      <span style="margin-left:1%;">h</span>
+  <div style="display: flex; justify-content: center; gap: 0.5em; font-size: 2em;">
+    <!-- Morning column -->
+    <div style="display: flex; flex-direction: column; align-items: center;">
+      <div style="display: flex; align-items: center;">
+        <input class="time" type="number" id="morningHour">
+        <span>:</span>
+        <input class="time" type="number" id="morningMinute">
+        <span style="margin-left: 0.5em;">h</span>
+      </div>
+      <div style="color: lightgrey; font-size: 0.55em; margin-top: 1em; margin-left: -2em;">
+        Sunrise: <span id="sunrise">--:--h</span>
+      </div>
     </div>
 
-    <div style="display: flex; justify-content: center; align-items: center;">
+    <!-- Night column -->
+    <div style="display: flex; flex-direction: column; align-items: center;">
+      <div style="display: flex; align-items: center;">
+        <input class="time" type="number" id="nightHour">
+        <span>:</span>
+        <input class="time" type="number" id="nightMinute">
+        <span style="margin-left: 0.5em;">h</span>
+      </div>
+      <div style="color: lightgrey; font-size: 0.55em; margin-top: 1em; margin-left: -2em;">
+        Sunset: <span id="sunset">--:--h</span>
+      </div>
+    </div>
+  </div>
+
+    <!-- <hr style="margin-top: 5em;"> -->
+
+<!-- Row with all 3 switches -->
+<div style="display: flex; justify-content: center; gap: 2.5em; align-items: center; margin-top: 3em; margin-bottom: 1em;">
+
+  <!-- Solar charger -->
+  <div style="text-align: center;">
+    <span style="display: block; margin-bottom: 0.5em;">Solar Charger</span>
+    <label class="switch">
+      <input type="checkbox" id="solarChargerSwitch">
+      <span class="slider round"></span>
+    </label>
+  </div>
+
+  <!-- Rain sensor -->
+  <div style="text-align: center;">
+    <span style="display: block; margin-bottom: 0.5em;">Rain Sensor</span>
+    <label class="switch">
+      <input type="checkbox" id="rainSensorSwitch">
+      <span class="slider round"></span>
+    </label>
+  </div>
+
+  <!-- 12V output -->
+  <div style="text-align: center;">
+    <span style="display: block; margin-bottom: 0.5em;">12V Output</span>
+    <label class="switch">
+      <input type="checkbox" id="output12VSwitch">
+      <span class="slider round"></span>
+    </label>
+  </div>
+
+</div>
+
+
+    <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 6em;">
       <button class="button-save" id="saveTime">SAVE</button>
     </div>
 
-    <hr style="margin-top: 5em;">
-    <span style="display: flex; justify-content: center; margin-top: 1em">
+    <hr style="margin-top: 3em;">
+    <div style="display: flex; justify-content: center; align-items: center; margin-top: 1em; text-align: center;">
       Use these buttons to set the current position as the end of the awning
-    </span>
+    </div>
+
     <div style="display: flex; justify-content: center; margin-top: 2em">
       <table style="table-layout: fixed;">
         <tr>
@@ -127,9 +180,9 @@
       <span style="margin-bottom: 1em; margin-top: 1em">WiFi Configuration</span>
     </div>
 
-    <div style="display: flex; justify-content: center; font-size: 2em">
-      <input style="margin-right: 1em; height: 3em; border-radius: 0.5em; text-align: center" placeholder="SSID" id="ssid">
-      <input style="margin-left: 1em; border-radius: 0.5em; text-align: center" placeholder="Password" type="password" id="password">
+    <div style="display: flex; justify-content: center; font-size: 2em;">
+      <input style="margin-right: 1em; height: 3em; border-radius: 0.5em; text-align: center; width: 35%" placeholder="SSID" id="ssid">
+      <input style="margin-left: 1em; border-radius: 0.5em; text-align: center; width: 35%" placeholder="Password" type="password" id="password">
     </div>
 
     <div style="display: flex; justify-content: center;">
@@ -140,6 +193,11 @@
       <button class="button-save" style="margin-top:0" id="saveWifi" onclick="saveWifi()">SAVE</button>
     </div>
 
+    <hr style="margin-top: 4em;">
+    <div style="display: flex; justify-content: center; margin-top: 1em">
+      <button class="button" id="resetButton" onclick="resetESP()">RESET ESP32</button>
+    </div>
+
     <script>
       const awningPosition = [0, 0];
       const distance = [0, 0];
@@ -147,31 +205,67 @@
       const awningAnimation = [null, null];
 
       function buttonClick(button) {
-        var xhr = new XMLHttpRequest();
-        xhr.open("POST", "/move");
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify({ buttonId: button.id }));
 
-        const index = button.id.slice(-1);
-        if (button.id.startsWith("up")) {
-            document.getElementById("reason" + index).textContent = "Remote Button";
-            direction[index] = "up";
-            startAnimation("fill" + index);
-        } else if (button.id.startsWith("down")) {
-            document.getElementById("reason" + index).textContent = "Remote Button";
-            direction[index] = "down";
-            startAnimation("fill" + index);
-        } else if (button.id.startsWith("stop")) {
-            cancelAnimation(index);
-        }
-    }
+          const index = button.id.slice(-1);
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/move");
+          xhr.setRequestHeader("Content-Type", "application/json");
+
+          xhr.onload = function () {
+              if (xhr.status === 200) {
+                  // Only proceed if response is OK
+                  if (button.id.startsWith("up")) {
+                      document.getElementById("reason" + index).textContent = "Remote Button";
+                      direction[index] = "up";
+                      startAnimation("fill" + index);
+                      document.getElementById("output12VSwitch").checked = true;
+                  } else if (button.id.startsWith("down")) {
+                      document.getElementById("reason" + index).textContent = "Remote Button";
+                      direction[index] = "down";
+                      startAnimation("fill" + index);
+                      document.getElementById("output12VSwitch").checked = true;
+                  } else if (button.id.startsWith("stop")) {
+                      cancelAnimation(index);
+                  }
+              } else {
+                  console.error("Request failed with status:", xhr.status);
+              }
+          };
+
+          xhr.onerror = function () {
+              console.error("Network error occurred.");
+          };
+
+          xhr.send(JSON.stringify({ buttonId: button.id }));
+      }
 
       function configure(buttonId) {
         var xhr = new XMLHttpRequest();
         xhr.open("POST", "/setEndPosition");
         xhr.setRequestHeader("Content-Type", "application/json");
+
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState === XMLHttpRequest.DONE && xhr.status === 200) {
+            // Toggle visibility based on which button was clicked
+            if (buttonId === "end0") {
+              document.getElementById("end0").hidden = true;
+              document.getElementById("save0").hidden = false;
+            } else if (buttonId === "save0") {
+              document.getElementById("save0").hidden = true;
+              document.getElementById("end0").hidden = false;
+            } else if (buttonId === "end1") {
+              document.getElementById("end1").hidden = true;
+              document.getElementById("save1").hidden = false;
+            } else if (buttonId === "save1") {
+              document.getElementById("save1").hidden = true;
+              document.getElementById("end1").hidden = false;
+            }
+          }
+        };
+
         xhr.send(JSON.stringify({ buttonId: buttonId }));
       }
+
 
       function home() {
         var xhr = new XMLHttpRequest();
@@ -238,9 +332,6 @@
           document.getElementById("batteryCurrent").textContent = data.batteryCurrent;
           document.getElementById("pvCurrent").textContent      = data.pvCurrent;
 
-          // update awning positions from server
-          awningPosition[0] = data.awning0Percent; // expect 0-100
-          awningPosition[1] = data.awning1Percent;
           distance[0] = data.dist0;
           distance[1] = data.dist1;
           
@@ -267,13 +358,15 @@
 
           // immediately reflect in fill elements
           if (distance[0] == 0 || reverse0) {
+            awningPosition[0] = data.awning0Percent;
             document.getElementById("fill0").style.transform = `scaleY(${awningPosition[0]/100})`;
             if (distance[0] == 0) {
               cancelAnimation(0);
             }
           }
           if (distance[1] == 0 || reverse1) {
-            document.getElementById("fill1").style.transform = `scaleY(${awningPosition[1]/100})`;
+            awningPosition[1] = data.awning1Percent;
+            document.getElementById("fill0").style.transform = `scaleY(${awningPosition[0]/100})`;
             if (distance[1] == 0) {
               cancelAnimation(1);
             }
@@ -305,7 +398,10 @@
             morningHour: config.morningHour,
             morningMinute: config.morningMinute,
             nightHour: config.nightHour,
-            nightMinute: config.nightMinute
+            nightMinute: config.nightMinute,
+            rainSensorEnabled: !!config.rainSensorEnabled,
+            output12VEnabled: !!config.output12VEnabled,
+            solarChargerEnabled: !!config.solarChargerEnabled
           };
 
           // Fill UI
@@ -314,7 +410,17 @@
           document.getElementById("morningMinute").value  = String(originalConfig.morningMinute).padStart(2, "0");
           document.getElementById("nightHour").value      = String(originalConfig.nightHour).padStart(2, "0");
           document.getElementById("nightMinute").value    = String(originalConfig.nightMinute).padStart(2, "0");
-
+          document.getElementById("rainSensorSwitch").checked = originalConfig.rainSensorEnabled;
+          document.getElementById("output12VSwitch").checked = originalConfig.output12VEnabled;
+          document.getElementById("solarChargerSwitch").checked = originalConfig.solarChargerEnabled;
+          document.getElementById("reason0").textContent = config.positionReason0;
+          document.getElementById("reason1").textContent = config.positionReason1;
+          document.getElementById("moveTime0").textContent = config.moveTime0;
+          document.getElementById("moveTime1").textContent = config.moveTime1;
+          if (config.sunrise.length == 6) {
+            document.getElementById("sunrise").textContent = config.sunrise;
+            document.getElementById("sunset").textContent = config.sunset;
+          }
           hideSaveButton(); // reset save button
         } catch (err) {
           console.error("Fetch config error:", err);
@@ -327,7 +433,10 @@
           morningHour: parseInt(document.getElementById("morningHour").value) || 0,
           morningMinute: parseInt(document.getElementById("morningMinute").value) || 0,
           nightHour: parseInt(document.getElementById("nightHour").value) || 0,
-          nightMinute: parseInt(document.getElementById("nightMinute").value) || 0
+          nightMinute: parseInt(document.getElementById("nightMinute").value) || 0,
+          rainSensorEnabled: document.getElementById("rainSensorSwitch").checked,
+          output12VEnabled: document.getElementById("output12VSwitch").checked,
+          solarChargerEnabled: document.getElementById("solarChargerSwitch").checked
         };
 
         // Compare JSON representations
@@ -351,7 +460,10 @@
           morningHour: parseInt(document.getElementById("morningHour").value) || 0,
           morningMinute: parseInt(document.getElementById("morningMinute").value) || 0,
           nightHour: parseInt(document.getElementById("nightHour").value) || 0,
-          nightMinute: parseInt(document.getElementById("nightMinute").value) || 0
+          nightMinute: parseInt(document.getElementById("nightMinute").value) || 0,
+          rainSensorEnabled: document.getElementById("rainSensorSwitch").checked ? 1 : 0,
+          output12VEnabled: document.getElementById("output12VSwitch").checked ? 1 : 0,
+          solarChargerEnabled: document.getElementById("solarChargerSwitch").checked ? 1 : 0
         };
 
         try {
@@ -379,9 +491,29 @@
         document.getElementById("morningMinute").addEventListener("input", checkForChanges);
         document.getElementById("nightHour").addEventListener("input", checkForChanges);
         document.getElementById("nightMinute").addEventListener("input", checkForChanges);
+        document.getElementById("rainSensorSwitch").addEventListener("change", checkForChanges);
+        document.getElementById("output12VSwitch").addEventListener("change", checkForChanges);
+        document.getElementById("solarChargerSwitch").addEventListener("change", checkForChanges);
 
         document.getElementById("saveTime").addEventListener("click", saveConfig);
       });
+
+      function resetESP() {
+        if (confirm("Are you sure you want to reset the ESP32?")) {
+          fetch("/reset", { method: "POST" })
+            .then(response => {
+              if (response.ok) {
+                alert("ESP32 is restarting...");
+              } else {
+                alert("Reset failed.");
+              }
+            })
+            .catch(err => {
+              console.error("Reset error:", err);
+              alert("Error sending reset request.");
+            });
+        }
+      }
     </script>
   </body>
 </html>

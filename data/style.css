@@ -62,7 +62,12 @@ input:checked+.slider:before {
     margin-bottom: 1em;
     border-radius: 20px;
     color: #000000;
-    background-color: #f7f7f7;
+    background-color: #f2f2f2;
+  transition: background-color 0.2s;
+}
+
+.button:active {
+  background-color: rgba(0, 150, 255, 0.7); /* clear blue flash */
 }
 
 .button-save {
@@ -76,6 +81,11 @@ input:checked+.slider:before {
     color: #000000;
 }
 
+.button.flash {
+  background-color: rgba(0, 208, 255, 0.7);
+  transition: background-color 0.3s;
+}
+
 .time {
     width: 2em;
     height: 2em;
@@ -83,6 +93,7 @@ input:checked+.slider:before {
     border-radius: 20px;
     display: block;
     text-align: center;
+    padding: 0;  
 }
 
 input:disabled {
@@ -115,4 +126,15 @@ input:disabled {
     justify-content: center;
     align-items: center;
     margin-top: 2em;
+}
+
+.top-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: lightgrey;
+  margin-bottom: 2em;
+  width: 100%;
+  flex-wrap: wrap;
 }
