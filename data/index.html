@@ -6,6 +6,7 @@
     <link rel="stylesheet" type="text/css" href="/style.css">
   </head>
   <body>
+    <div id="rain-container" style="display: none;"></div>
     <div style="display: flex; justify-content: center; margin-bottom: 1em">
       <h1>Kitchen Awnings</h1>
     </div>
@@ -111,7 +112,7 @@
     <!-- <hr style="margin-top: 5em;"> -->
 
 <!-- Row with all 3 switches -->
-<div style="display: flex; justify-content: center; gap: 2.5em; align-items: center; margin-top: 3em; margin-bottom: 1em;">
+<div class="switch-row">
 
   <!-- Solar charger -->
   <div style="text-align: center;">
@@ -203,6 +204,8 @@
       const distance = [0, 0];
       const direction = ["up", "up"];
       const awningAnimation = [null, null];
+      let raining = false;
+      let firstLoad = true;
 
       function buttonClick(button) {
 
@@ -285,41 +288,39 @@
 
       // animate fill from current percentage
       function startAnimation(id) {
-          const index = parseInt(id.slice(-1));
-          const fillElement = document.getElementById(id);
-          cancelAnimation(index);
+        const index = parseInt(id.slice(-1));
+        const fillElement = document.getElementById(id);
+        cancelAnimation(index);
+        const speed = 0.05; // % per frame
 
-          const speed = 0.05; // % per frame, adjust for faster/slower
-
-          function animate() {
-              if (direction[index] === "down") {
-                  awningPosition[index] += speed;
-                  if (awningPosition[index] > 100) awningPosition[index] = 100;
-              } else if (direction[index] === "up") {
-                  awningPosition[index] -= speed;
-                  if (awningPosition[index] < 0) awningPosition[index] = 0;
-              }
-
-              fillElement.style.transform = `scaleY(${awningPosition[index]/100})`;
-
-              if ((direction[index] === "down" && awningPosition[index] < 100) ||
-                  (direction[index] === "up" && awningPosition[index] > 0)) {
-                  awningAnimation[index] = requestAnimationFrame(animate);
-              } else {
-                  awningAnimation[index] = null;
-              }
+        function animate() {
+          if (direction[index] === "down") {
+            awningPosition[index] += speed;
+            if (awningPosition[index] > 100) awningPosition[index] = 100;
+          } else if (direction[index] === "up") {
+            awningPosition[index] -= speed;
+            if (awningPosition[index] < 0) awningPosition[index] = 0;
           }
 
-          animate();
+          fillElement.style.transform = `scaleY(${awningPosition[index] / 100})`;
+
+          if ((direction[index] === "down" && awningPosition[index] < 100) ||
+              (direction[index] === "up" && awningPosition[index] > 0)) {
+            awningAnimation[index] = requestAnimationFrame(animate);
+          } else {
+            awningAnimation[index] = null;
+          }
+        }
+
+        animate();
       }
 
       function cancelAnimation(index) {
-          if (awningAnimation[index]) {
-              cancelAnimationFrame(awningAnimation[index]);
-              awningAnimation[index] = null;
-          }
+        if (awningAnimation[index]) {
+          cancelAnimationFrame(awningAnimation[index]);
+          awningAnimation[index] = null;
+        }
       }
-
 
       async function fetchData() {
         try {
@@ -327,52 +328,55 @@
           if (!response.ok) throw new Error("Network response not ok");
           const data = await response.json();
 
-          // update DOM
-          document.getElementById("batteryVoltage").textContent = data.batteryVoltage;
-          document.getElementById("batteryCurrent").textContent = data.batteryCurrent;
-          document.getElementById("pvCurrent").textContent      = data.pvCurrent;
+          // Update static info
+          document.getElementById("batteryVoltage").textContent = data.batteryVoltage.toFixed(2);
+          document.getElementById("batteryCurrent").textContent = data.batteryCurrent.toFixed(2);
+          document.getElementById("pvCurrent").textContent      = data.pvCurrent.toFixed(2);
+
+          raining = data.raining;
+          updateRainStatus(raining);
 
           distance[0] = data.dist0;
           distance[1] = data.dist1;
-          
-          let reverse0 = false;
-          let reverse1 = false;
 
-          if (distance[0] < 0 && direction[0] == "down") {
-            direction[0] == "up";
-            reverse0 = true;
-          }
-          if (distance[0] > 0 && direction[0] == "up") {
-            direction[0] == "down";
-            reverse0 = true;
-          }
+          [0,1].forEach(index => {
+            const serverPercent = (index === 0 ? data.awning0Percent : data.awning1Percent);
 
-          if (distance[1] < 0 && direction[1] == "down") {
-            direction[1] == "up";
-            reverse1 = true;
-          }
-          if (distance[1] > 0 && direction[1] == "up") {
-            direction[1] == "down";
-            reverse1 = true;
-          }
+            if (firstLoad || awningAnimation[index] == null) {
+              // On first load OR if idle → sync to server
+              awningPosition[index] = serverPercent;
+              document.getElementById("fill" + index).style.transform =
+                `scaleY(${awningPosition[index] / 100})`;
 
-          // immediately reflect in fill elements
-          if (distance[0] == 0 || reverse0) {
-            awningPosition[0] = data.awning0Percent;
-            document.getElementById("fill0").style.transform = `scaleY(${awningPosition[0]/100})`;
-            if (distance[0] == 0) {
-              cancelAnimation(0);
+              // If motor moving, start animation in correct direction
+              if (distance[index] !== 0) {
+                if (index === 0) {
+                  direction[index] = distance[index] < 0 ? "up" : "down";
+                } else {
+                  direction[index] = distance[index] < 0 ? "down" : "up";
+                }
+                startAnimation("fill" + index);
+              }
+            } else {
+              // Already animating → don’t reset percent, only react to stop/reverse
+              if (distance[index] === 0) {
+                cancelAnimation(index);
+              } else {
+                let newDir;
+                if (index === 0) {
+                  newDir = distance[index] < 0 ? "up" : "down";
+                } else {
+                  newDir = distance[index] < 0 ? "down" : "up";
+                }
+                if (newDir !== direction[index]) {
+                  direction[index] = newDir;
+                  startAnimation("fill" + index); // restart with new direction
+                }
+              }
             }
-          }
-          if (distance[1] == 0 || reverse1) {
-            awningPosition[1] = data.awning1Percent;
-            document.getElementById("fill0").style.transform = `scaleY(${awningPosition[0]/100})`;
-            if (distance[1] == 0) {
-              cancelAnimation(1);
-            }
-          }
-          
+          });
 
+          firstLoad = false;
         } catch (err) {
           console.error("Fetch error:", err);
         }
@@ -514,6 +518,33 @@
             });
         }
       }
+
+      function createRainDrops(container, count = 80) {
+        container.innerHTML = ''; // Clear previous drops
+        for (let i = 0; i < count; i++) {
+          const drop = document.createElement('div');
+          drop.className = 'raindrop';
+          drop.style.left = `${Math.random() * window.innerWidth}px`;
+          drop.style.animationDuration = `${1.5 + Math.random() * 2}s`;
+          drop.style.animationDelay = `${Math.random() * 3}s`;
+          container.appendChild(drop);
+        }
+      }
+
+      function updateRainStatus(raining) {
+        const rainContainer = document.getElementById('rain-container');
+        if (raining) {
+          rainContainer.style.display = 'block';
+          if (rainContainer.children.length === 0) {
+            createRainDrops(rainContainer);
+          }
+        } else {
+          rainContainer.style.display = 'none';
+          rainContainer.innerHTML = ''; // Optional: remove drops
+        }
+      }
+
+
     </script>
   </body>
 </html>

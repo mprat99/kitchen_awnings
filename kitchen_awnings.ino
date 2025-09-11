@@ -62,7 +62,9 @@
 // Hardware Configuration
 // =======================
 #define R_SENSE 0.11f   // TMC2209 sense resistor
-#define STALL_VALUE 60  // StallGuard threshold
+uint8_t STALL_VALUE = 60;  // StallGuard threshold
+uint32_t STALL_MIN_SPEED = 500;  // StallGuard threshold
+
 
 HardwareSerial SerialTMC(2);  // UART2 for both drivers
 
@@ -77,8 +79,8 @@ FastAccelStepperEngine engine;
 FastAccelStepper *stepper[2];
 
 // Motion parameters
-const uint32_t speed = 10000;         // in steps/s
-const uint32_t acceleration = 2000;  // in steps/s²
+uint32_t speed = 7000;         // in steps/s
+uint32_t acceleration = 2000;  // in steps/s²
 
 
 // Enable pins (active LOW)
@@ -96,7 +98,8 @@ int targetPosition[] = { 0, 0 };
 int currentPosition[] = { 0, 0 };
 int beforeRainPosition[] = { 0, 0 };
 
-int downPosition[] = { 300000, -200000 };
+int windowHeight[] = { 229000, -140500 };
+int downPosition[] = { 229000, -140500 };
 int maxPosition[] = { 500000, -300000 };
 
 const char *positionReason[] = { "Power On", "Power On" };
@@ -146,9 +149,9 @@ unsigned long currentMillis = 0;
 unsigned long checkTimeMillis = 0;
 unsigned long checkTimeInterval = 60000;
 unsigned long checkRainMillis = 0;
-unsigned long checkRainInterval = 10000;
+unsigned long checkRainInterval = 5000;
 unsigned long apStartTime = 0;
-unsigned long highCPUFreqStart = 0;
+// unsigned long highCPUFreqStart = 0;
 unsigned long apTimeout = 10000;
 unsigned long lastAPIrequestMillis = 0;
 unsigned long lastAPIrequestTimeout = 5000;
@@ -186,9 +189,8 @@ bool bootUpSunCheck = false;
 // bool highCPU          = false;
 
 
-// Use one shared rain flag per motor so logic is independent
 int rainState = 0;
-bool rainFlag[] = { false, false };
+bool rainFlag = false;
 
 bool settingEnd[] = { false, false };
 
@@ -276,7 +278,7 @@ void setupDrivers() {
   driver0.microsteps(16);
   driver0.en_spreadCycle(false);
   driver0.pwm_autoscale(true);
-  driver0.TCOOLTHRS(700);
+  driver0.TCOOLTHRS(STALL_MIN_SPEED);
   driver0.SGTHRS(STALL_VALUE);
 
   driver1.begin();
@@ -286,7 +288,7 @@ void setupDrivers() {
   driver1.microsteps(16);
   driver1.en_spreadCycle(false);
   driver1.pwm_autoscale(true);
-  driver1.TCOOLTHRS(700);
+  driver1.TCOOLTHRS(STALL_MIN_SPEED);
   driver1.SGTHRS(STALL_VALUE);
 }
 
@@ -311,13 +313,13 @@ void setupSteppers() {
   stepper[0]->setDirectionPin(DIR0);
   stepper[0]->setEnablePin(ENABLE0, true);
   stepper[0]->setSpeedInHz(speed);
-  stepper[0]->setAcceleration(2000);
+  stepper[0]->setAcceleration(acceleration);
   stepper[0]->setAutoEnable(true);
 
   stepper[1]->setDirectionPin(DIR1);
   stepper[1]->setEnablePin(ENABLE1, true);
   stepper[1]->setSpeedInHz(speed);
-  stepper[1]->setAcceleration(2000);
+  stepper[1]->setAcceleration(acceleration);
   stepper[1]->setAutoEnable(true);
 }
 
@@ -368,8 +370,8 @@ void setup() {
   delay(100);
 
   // Stall interrupts per motor
-  // attachInterrupt(digitalPinToInterrupt(STALL0), stallDetected0, RISING);
-  // attachInterrupt(digitalPinToInterrupt(STALL1), stallDetected1, RISING);
+  attachInterrupt(digitalPinToInterrupt(STALL0), stallDetected0, RISING);
+  attachInterrupt(digitalPinToInterrupt(STALL1), stallDetected1, RISING);
 
   // Initial INA read
   inaTrigger();
@@ -378,10 +380,7 @@ void setup() {
 
   if (!lowVoltage) {
     initCharger();
-    rainState = digitalRead(RAIN_PIN);
-    if (rainState) {
-      home();
-    }
+    home();
     checkRain();
   }
 
@@ -432,22 +431,22 @@ void configureServer() {
     //   inaBat.setResistorRange(R_SHUNT_BAT, 4.0f);
     // }
 
-    float awning0Percent = 100.0f * ((float)stepper[0]->getCurrentPosition()) / ((float)downPosition[0]);
-    float awning1Percent = 100.0f * ((float)stepper[1]->getCurrentPosition()) / ((float)downPosition[1]);
+    float awning0Percent = 100.0f * ((float)stepper[0]->getCurrentPosition()) / ((float)windowHeight[0]);
+    float awning1Percent = 100.0f * ((float)stepper[1]->getCurrentPosition()) / ((float)windowHeight[1]);
     int dist0 = stepper[0]->targetPos() - stepper[0]->getCurrentPosition();
     int dist1 = stepper[1]->targetPos() - stepper[1]->getCurrentPosition();
     StaticJsonDocument<256> doc;
-    doc["batteryVoltage"] = roundf(batteryVoltage * 100) / 100;
-    doc["batteryCurrent"] = roundf(batteryCurrent * 100) / 100;
-    doc["pvCurrent"]      = roundf(pvCurrent * 100) / 100;
+    doc["batteryVoltage"]   = batteryVoltage;
+    doc["batteryCurrent"]   = batteryCurrent;
+    doc["pvCurrent"]        = pvCurrent;
     doc["pos0"]             = stepper[0]->getCurrentPosition();
     doc["pos1"]             = stepper[1]->getCurrentPosition();
     doc["dist0"]            = dist0;
     doc["dist1"]            = dist1;
-    doc["awning0Percent"]   = roundf(awning0Percent * 10) /10;
-    doc["awning1Percent"]   = roundf(awning1Percent * 10) /10;
+    doc["awning0Percent"]   = awning0Percent;
+    doc["awning1Percent"]   = awning1Percent;
     doc["homeFlag"]         = homeFlag;
-    doc["raining"]          = rainState;
+    doc["raining"]          = !rainState;
 
     char json[256];
     serializeJson(doc, json, sizeof(json));
@@ -495,13 +494,10 @@ void configureServer() {
 
     request->send(200, "application/json", json);
   });
-  // ------------------------------
-  // POST routes with body handlers
-  // ------------------------------
+
   server.on(
     "/move", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      // request->send(200, "text/plain", "Data received");
     },
     NULL,  // No upload handler needed
     handleMove);
@@ -509,7 +505,6 @@ void configureServer() {
   server.on(
     "/saveConfig", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      // request->send(200, "text/plain", "Data Saved");
     },
     NULL,
     handleSave);
@@ -528,6 +523,22 @@ void configureServer() {
     },
     NULL,
     handleSaveWifi);
+
+  server.on(
+    "/setupDrivers", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      // request->send(200, "text/plain", "Data Saved");
+    },
+    NULL,
+    handleSetupDrivers);
+
+  server.on(
+    "/setupInas", HTTP_POST,
+    [](AsyncWebServerRequest *request) {
+      // request->send(200, "text/plain", "Data Saved");
+    },
+    NULL,
+    handleSetupInas);
 
   // ------------------------------
   // Special POST route without body
@@ -609,16 +620,15 @@ void disableOutput12V() {
 // Replace home() function
 // =======================
 void home() {
-  initialHome = true;
   homeFlag = true;
-  for (int i = 0; i < 2; i++) {
+  for (uint8_t i = 0; i < 2; i++) {
     homed[i] = false;
     moveFlag[i] = true;
-    setupDrivers();
-    stepper[i]->setSpeedInHz(speed/3);
-    stepper[i]->setCurrentPosition(maxPosition[i]);
-    stepper[i]->moveTo(0);
-    getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
+    stepper[i]->setSpeedInHz(speed/2);
+    currentPosition[i] = maxPosition[i];
+    // stepper[i]->setCurrentPosition(currentPosition[i]);
+    targetPosition[i] = 0;
+    move(i);
   }
 }
 
@@ -629,7 +639,6 @@ void handleMove(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_
     request->send(400, "text/plain", "Bad JSON");
     return;
   }
-
   const char *buttonId = json["buttonId"];
   if (!buttonId) {
     request->send(400, "text/plain", "Missing buttonId");
@@ -644,7 +653,6 @@ void handleMove(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_
   }
 
   positionReason[i] = "Remote button";
-  getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
 
   if (strstr(buttonId, "up") != NULL) {
     moveUp(i);
@@ -667,6 +675,7 @@ void moveUp(uint8_t i) {
 
 void stop(uint8_t i) {
   stepper[i]->forceStop();
+  delay(20); //forceStop needs about 20ms
   currentPosition[i] = stepper[i]->getCurrentPosition();
   targetPosition[i] = currentPosition[i];
 }
@@ -678,15 +687,18 @@ void moveDown(uint8_t i) {
 
 void move(uint8_t i) {
   if (digitalRead(OUTPUT_12V_EN) == HIGH) {
+    delay(20);
     enableOutput12V();
   }
   setupDrivers();
   moveFlag[i] = true;
+  stepper[i]->setCurrentPosition(currentPosition[i]);
   stepper[i]->moveTo(targetPosition[i]);
+  getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
 }
 
 void checkMotors() {
-  for (int i = 0; i < 2; i++) {
+  for (uint8_t i = 0; i < 2; i++) {
     if (stallFlag[i]) {
       stepper[i]->forceStop();
       stallFlag[i] = false;
@@ -700,15 +712,20 @@ void checkMotors() {
     if (moveFlag[i] && !stepper[i]->isRunning()) {
 
       if (homeFlag) {
+        if (i == 0) {
+          stepper[i]->setCurrentPosition(0);
+          stepper[i]->moveTo(1500, true);
+        }
         stepper[i]->setCurrentPosition(0);
         homed[i] = true;
         stepper[i]->setSpeedInHz(speed);
         if (homed[0] && homed[1]) {
           homeFlag = false;
+          initialHome = true;
         }
       }
       currentPosition[i] = stepper[i]->getCurrentPosition();
-      targetPosition[i] = currentPosition[i];
+      // targetPosition[i] = currentPosition[i];
       moveFlag[i] = false;
       disableOutput12V();
     }
@@ -861,22 +878,18 @@ void checkTime() {
   }
 
   if (scheduledAwnings) {
-    if (currentHour == morningHour && currentMinute == morningMinute && !moveUpMorning) {
+    if (!rainFlag && currentHour == morningHour && currentMinute == morningMinute && !moveUpMorning) {
       for (uint8_t i = 0; i < 2; i++) {
-        if (currentPosition[i] != 0 && !rainFlag[i]) {
+        if (currentPosition[i] != 0) {
           moveUpMorning = true;
           moveUp(i);
           positionReason[i] = "Scheduled Morning";
-          getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
         }
       }
-    } else if (currentHour == nightHour && currentMinute == nightMinute && !moveDownNight) {
+    } else if (!rainFlag && currentHour == nightHour && currentMinute == nightMinute && !moveDownNight) {
       for (uint8_t i = 0; i < 2; i++) {
-        if (!rainFlag[i]) {
-          moveDown(i);
-          positionReason[i] = "Scheduled Night";
-          getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
-        }
+        moveDown(i);
+        positionReason[i] = "Scheduled Night";
       }
       moveUpMorning = false;
       moveDownNight = true;
@@ -980,48 +993,39 @@ char* hoursToString(double h, char* str) {
 void checkRain() {
   checkRainMillis = currentMillis;
   rainState = digitalRead(RAIN_PIN);
-
-  if (rainState == LOW) {
-    for (uint8_t i = 0; i < 2; i++) {
-      if (!rainFlag[i]) {
-        rainFlag[i] = true;
+  if(initialHome) {
+    if (rainState == LOW) {
+      if (!rainFlag) {
+        rainFlag = true;
+        for (uint8_t i = 0; i < 2; i++) {
         beforeRainPosition[i] = currentPosition[i];
         moveDown(i);
         positionReason[i] = "It's Raining";
-        getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
       }
     }
     checkRainInterval = 300000; // check every 5 min if it started to rain
   } else {  // HIGH
-    for (uint8_t i = 0; i < 2; i++) {
-      if (rainFlag[i]) {
-        rainFlag[i] = false;
-        if (initialHome) {
+      if (rainFlag) {
+        rainFlag = false;
+        for (uint8_t i = 0; i < 2; i++) {
           if (!moveDownNight) {
             int target = (moveUpMorning) ? 0 : beforeRainPosition[i];
             if (currentPosition[i] != target) {
               targetPosition[i] = target;
               moveUp(i);
               positionReason[i] = "Stopped Raining";
-              getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
             }
             moveUpMorning = false;
           } else if (currentPosition[i] != beforeRainPosition[i]) {
             moveDown(i);
             positionReason[i] = "Stopped Raining";
-            getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
           }
-        } else {
-          home();
-          positionReason[0] = "Home After Rain";
-          positionReason[1] = "Home After Rain";
-          getMoveTimeString(moveTimeStr[0], sizeof(moveTimeStr[0]));
-          getMoveTimeString(moveTimeStr[1], sizeof(moveTimeStr[1]));
-        }
       }
     }
-    checkRainInterval = 10000;
+    checkRainInterval = 5000;
   }
+  }
+  
 }
 
 // =======================
@@ -1075,7 +1079,7 @@ void handleSetEnd(AsyncWebServerRequest *request, uint8_t *data, size_t len, siz
   const char *buttonId = json["buttonId"];
   uint8_t i = buttonId[strlen(buttonId) - 1] == '0' ? 0 : 1;
 
-  if (settingEnd[i]) {
+  if (settingEnd[i] && stepper[i]->getCurrentPosition() != 0) {
     downPosition[i] = stepper[i]->getCurrentPosition();
   }
   settingEnd[i] = !settingEnd[i];
@@ -1094,6 +1098,79 @@ void handleSaveWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, s
   credentials.password[passwordMaxSize - 1] = 0;
   EEPROM.put(0, credentials);
   EEPROM.commit();
+}
+
+void handleSetupDrivers(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  StaticJsonDocument<128> json;
+  DeserializationError error = deserializeJson(json, data, len);
+  if (error) {
+    request->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+
+  int stallValue = json["stall_value"] | -1;
+  int stallMinSpeed = json["stall_min_speed"] | -1;
+  int maxSpeed = json["max_speed"] | -1;
+  int acc = json["acceleration"] | -1;
+
+  if (stallValue >= 0 && stallValue <= 255) {
+    STALL_VALUE = stallValue;
+  }
+
+  if (stallMinSpeed >= 1 && stallMinSpeed <= 1048575) {
+    STALL_MIN_SPEED = stallMinSpeed;
+  }
+
+  if (maxSpeed >= 1 && maxSpeed <= 300000) {
+    speed = maxSpeed;
+    stepper[0]->setSpeedInHz(speed);
+    stepper[1]->setSpeedInHz(speed);
+  }
+
+  if (acc >= 1 && acc <= 300000) {
+    acceleration = acc;
+    stepper[0]->setAcceleration(acceleration);
+    stepper[1]->setSpeedInHz(acceleration);
+  }
+
+  setupDrivers();
+
+  char response[100];
+  snprintf(response, sizeof(response),
+           "STALL_VALUE = %d\nSTALL_MIN_SPEED = %d\nspeed = %d\nacceleration = %d",
+           STALL_VALUE, STALL_MIN_SPEED, speed, acceleration);
+
+  request->send(200, "text/plain", response);
+}
+
+void handleSetupInas(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+  StaticJsonDocument<128> json;
+  DeserializationError error = deserializeJson(json, data, len);
+  if (error) {
+    request->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+
+  float shunt_bat = json["shunt_bat"] | -1.0;
+  float shunt_pv = json["shunt_pv"] | -1.0;
+
+  if (shunt_bat > 0.0 && shunt_bat <= 1.0) {
+    R_SHUNT_BAT = shunt_bat;
+  }
+
+  if (shunt_pv > 0.0 && shunt_pv <= 1.0) {
+    R_SHUNT_PV = shunt_pv;
+  }
+  if (shunt_bat > 0 || shunt_pv > 0) {
+    inaSetup();
+  }
+
+  char response[100];
+  snprintf(response, sizeof(response),
+           "R_SHUNT_BAT = %f\nR_SHUNT_PV = %f",
+           R_SHUNT_BAT, R_SHUNT_PV);
+
+  request->send(200, "text/plain", response);
 }
 
 
