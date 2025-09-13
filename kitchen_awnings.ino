@@ -63,6 +63,7 @@
 // =======================
 #define R_SENSE 0.11f   // TMC2209 sense resistor
 uint8_t STALL_VALUE = 60;  // StallGuard threshold
+uint8_t LOW_STALL_VALUE = 30;  // StallGuard threshold to avoid stall when no necessary to check
 uint32_t STALL_MIN_SPEED = 500;  // StallGuard threshold
 
 
@@ -71,6 +72,8 @@ HardwareSerial SerialTMC(2);  // UART2 for both drivers
 // Two TMC2209 over same UART, different addresses
 TMC2209Stepper driver0(&SerialTMC, R_SENSE, UART_ADDR0);
 TMC2209Stepper driver1(&SerialTMC, R_SENSE, UART_ADDR1);
+
+TMC2209Stepper driver[] = {driver0, driver1};
 
 // =======================
 // FastAccelStepper
@@ -92,6 +95,7 @@ int enablePin[] = { ENABLE0, ENABLE1 };
 // =======================
 volatile bool moveFlag[] = { false, false };
 bool homed[] = { false, false };
+uint8_t homingPhase[2] = {0, 0};
 
 
 int targetPosition[] = { 0, 0 };
@@ -152,7 +156,7 @@ unsigned long checkRainMillis = 0;
 unsigned long checkRainInterval = 5000;
 unsigned long apStartTime = 0;
 // unsigned long highCPUFreqStart = 0;
-unsigned long apTimeout = 10000;
+unsigned long apTimeout = 20000;
 unsigned long lastAPIrequestMillis = 0;
 unsigned long lastAPIrequestTimeout = 5000;
 // unsigned long highCPUFreqTimeout = 30000;
@@ -196,6 +200,7 @@ bool settingEnd[] = { false, false };
 
 // Independent stall flags (per motor)
 volatile bool stallFlag[] = { false, false };
+bool restored_stall_value = true;
 
 // =======================
 // INA226 measurement
@@ -271,25 +276,25 @@ void handleSetEnd(AsyncWebServerRequest *request, uint8_t *data, size_t len, siz
 void handleSaveWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
 
 void setupDrivers() {
-  driver0.begin();
-  driver0.toff(4);
-  driver0.blank_time(24);
-  driver0.rms_current(1600);
-  driver0.microsteps(16);
-  driver0.en_spreadCycle(false);
-  driver0.pwm_autoscale(true);
-  driver0.TCOOLTHRS(STALL_MIN_SPEED);
-  driver0.SGTHRS(STALL_VALUE);
+  driver[0].begin();
+  driver[0].toff(4);
+  driver[0].blank_time(24);
+  driver[0].rms_current(1600);
+  driver[0].microsteps(16);
+  driver[0].en_spreadCycle(false);
+  driver[0].pwm_autoscale(true);
+  driver[0].TCOOLTHRS(STALL_MIN_SPEED);
+  driver[0].SGTHRS(STALL_VALUE);
 
-  driver1.begin();
-  driver1.toff(4);
-  driver1.blank_time(24);
-  driver1.rms_current(1600);
-  driver1.microsteps(16);
-  driver1.en_spreadCycle(false);
-  driver1.pwm_autoscale(true);
-  driver1.TCOOLTHRS(STALL_MIN_SPEED);
-  driver1.SGTHRS(STALL_VALUE);
+  driver[1].begin();
+  driver[1].toff(4);
+  driver[1].blank_time(24);
+  driver[1].rms_current(1600);
+  driver[1].microsteps(16);
+  driver[1].en_spreadCycle(false);
+  driver[1].pwm_autoscale(true);
+  driver[1].TCOOLTHRS(STALL_MIN_SPEED);
+  driver[1].SGTHRS(STALL_VALUE);
 }
 
 void setupSteppers() {
@@ -367,6 +372,16 @@ void setup() {
   // EEPROM credentials
   EEPROM.begin(sizeof(WiFiCredentials));
   EEPROM.get(0, credentials);
+
+  if (strlen(credentials.ssid) == 0 || credentials.ssid[0] == 0xFF) {
+    Serial.println("Using hardcoded credentials.");
+    strncpy(credentials.ssid, ssid, sizeof(credentials.ssid));
+    strncpy(credentials.password, password, sizeof(credentials.password));
+  }
+
+  EEPROM.put(0, credentials);
+  EEPROM.commit();
+
   delay(100);
 
   // Stall interrupts per motor
@@ -483,9 +498,9 @@ void configureServer() {
   doc["sunset"] = sunsetBuf;
 
   doc["timeSynced"]       = timeSynced;
-  doc["positionReason0"]  = positionReason[0];   // assuming it's const char*
+  doc["positionReason0"]  = positionReason[0];   
   doc["positionReason1"]  = positionReason[1];
-  doc["moveTime0"]        = moveTimeStr[0];      // if you refactor to char[][]
+  doc["moveTime0"]        = moveTimeStr[0];    
   doc["moveTime1"]        = moveTimeStr[1];
 
   char json[512];
@@ -619,16 +634,28 @@ void disableOutput12V() {
 // =======================
 // Replace home() function
 // =======================
+// void home() {
+//   homeFlag = true;
+//   for (uint8_t i = 0; i < 2; i++) {
+//     homed[i] = false;
+//     moveFlag[i] = true;
+//     stepper[i]->setSpeedInHz(speed/2);
+//     int offset = (i == 0) ? -10000 : 10000;
+//     currentPosition[i] = maxPosition[i] + offset;
+//     targetPosition[i] = maxPosition[i];
+//     move(i);
+//   }
+// }
 void home() {
   homeFlag = true;
   for (uint8_t i = 0; i < 2; i++) {
+    if (stepper[i]->isRunning()) {
+      stepper[i]->stopMove();
+    }
     homed[i] = false;
     moveFlag[i] = true;
-    stepper[i]->setSpeedInHz(speed/2);
-    currentPosition[i] = maxPosition[i];
-    // stepper[i]->setCurrentPosition(currentPosition[i]);
-    targetPosition[i] = 0;
-    move(i);
+    homingPhase[i] = 0;  // Start at phase 0
+    stepper[i]->setSpeedInHz(speed / 2);
   }
 }
 
@@ -669,6 +696,7 @@ void handleMove(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_
 }
 
 void moveUp(uint8_t i) {
+  currentPosition[i] = stepper[i]->getCurrentPosition();
   targetPosition[i] = 0;
   move(i);
 }
@@ -681,14 +709,15 @@ void stop(uint8_t i) {
 }
 
 void moveDown(uint8_t i) {
+  currentPosition[i] = stepper[i]->getCurrentPosition();
   targetPosition[i] = settingEnd[i] ? maxPosition[i] : downPosition[i];
   move(i);
 }
 
 void move(uint8_t i) {
   if (digitalRead(OUTPUT_12V_EN) == HIGH) {
-    delay(20);
     enableOutput12V();
+    delay(50);
   }
   setupDrivers();
   moveFlag[i] = true;
@@ -699,34 +728,75 @@ void move(uint8_t i) {
 
 void checkMotors() {
   for (uint8_t i = 0; i < 2; i++) {
+
+    // Stall threshold adjustment
+    if (moveFlag[i] && !homeFlag && !restored_stall_value && abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) < 5000) {
+      driver[i].SGTHRS(STALL_VALUE);
+      restored_stall_value = true;
+    } else if (moveFlag[i] && !homeFlag && restored_stall_value && abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) > 5000) {
+      driver[i].SGTHRS(LOW_STALL_VALUE);
+      restored_stall_value = false;
+    }
+
+    // Handle stall detection
     if (stallFlag[i]) {
       stepper[i]->forceStop();
       stallFlag[i] = false;
+
       if (i == 0) {
         attachInterrupt(digitalPinToInterrupt(STALL0), stallDetected0, RISING);
-      }
-      else {
+      } else {
         attachInterrupt(digitalPinToInterrupt(STALL1), stallDetected1, RISING);
       }
-    }
-    if (moveFlag[i] && !stepper[i]->isRunning()) {
 
-      if (homeFlag) {
-        if (i == 0) {
-          stepper[i]->setCurrentPosition(0);
-          stepper[i]->moveTo(1500, true);
-        }
+      // Stall during Phase 2 means we've hit home
+      if (homeFlag && homingPhase[i] == 2) {
         stepper[i]->setCurrentPosition(0);
-        homed[i] = true;
-        stepper[i]->setSpeedInHz(speed);
-        if (homed[0] && homed[1]) {
-          homeFlag = false;
-          initialHome = true;
-        }
+        currentPosition[i] = 0;
+
+        // Phase 3: move slightly away from stall zone
+        targetPosition[i] = (i == 0) ? 2500 : -500;
+        move(i);
+        homingPhase[i] = 3;
       }
+    }
+
+    // Homing logic
+    if (moveFlag[i] && !stepper[i]->isRunning()) {
+      if (homeFlag) {
+        switch (homingPhase[i]) {
+          case 0: // Phase 0: pre-homing descent
+            currentPosition[i] = downPosition[i];
+            stepper[i]->setCurrentPosition(currentPosition[i]);
+            targetPosition[i] = (i == 0) ? currentPosition[i] + 4000 : currentPosition[i] - 4000;
+            move(i);
+            homingPhase[i] = 1;
+            break;
+
+          case 1: // Phase 1: move to 0 and wait for stall
+            currentPosition[i] = stepper[i]->getCurrentPosition();
+            targetPosition[i] = 0;
+            move(i);
+            homingPhase[i] = 2;
+            break;
+
+          case 3: // Phase 3: post-homing offset complete
+            homed[i] = true;
+            moveFlag[i] = false;
+            currentPosition[i] = 0;
+            stepper[i]->setCurrentPosition(currentPosition[i]);
+            stepper[i]->setSpeedInHz(speed);
+            if (homed[0] && homed[1]) {
+              homeFlag = false;
+              initialHome = true;
+            }
+            break;
+        }
+      } else {
+        moveFlag[i] = false;
+      }
+
       currentPosition[i] = stepper[i]->getCurrentPosition();
-      // targetPosition[i] = currentPosition[i];
-      moveFlag[i] = false;
       disableOutput12V();
     }
   }
@@ -801,6 +871,15 @@ void printResetReason() {
 
   DEBUG_PRINTLN(moveTimeStr[0]);
   DEBUG_PRINTLN(reason);
+}
+
+bool isResetReason(int index) {
+  const char* prefix = "Reset reason:";
+  return strncmp(positionReason[index], prefix, strlen(prefix)) == 0;
+}
+
+bool isZeroMoveTime(int index) {
+  return strcmp(moveTimeStr[index], "00:00h") == 0;
 }
 
 void connectToWiFi() {
@@ -947,21 +1026,21 @@ void calculateSunTimes() {
   if (sunriseLocal < 0)  sunriseLocal += 24;
   if (sunsetLocal < 0)   sunsetLocal += 24;
 
-{
-  struct tm sunriseTm = localTime;
-  sunriseTm.tm_hour = (int)sunriseLocal;
-  sunriseTm.tm_min  = (int)((sunriseLocal - sunriseTm.tm_hour) * 60);
-  sunriseTm.tm_sec  = (int)((((sunriseLocal - sunriseTm.tm_hour) * 60) - sunriseTm.tm_min) * 60);
-  sunriseTime = mktime(&sunriseTm);
-}
+  {
+    struct tm sunriseTm = localTime;
+    sunriseTm.tm_hour = (int)sunriseLocal;
+    sunriseTm.tm_min  = (int)((sunriseLocal - sunriseTm.tm_hour) * 60);
+    sunriseTm.tm_sec  = (int)((((sunriseLocal - sunriseTm.tm_hour) * 60) - sunriseTm.tm_min) * 60);
+    sunriseTime = mktime(&sunriseTm);
+  }
 
-{
-  struct tm sunsetTm = localTime;
-  sunsetTm.tm_hour = (int)sunsetLocal;
-  sunsetTm.tm_min  = (int)((sunsetLocal - sunsetTm.tm_hour) * 60);
-  sunsetTm.tm_sec  = (int)((((sunsetLocal - sunsetTm.tm_hour) * 60) - sunsetTm.tm_min) * 60);
-  sunsetTime = mktime(&sunsetTm);
-}
+  {
+    struct tm sunsetTm = localTime;
+    sunsetTm.tm_hour = (int)sunsetLocal;
+    sunsetTm.tm_min  = (int)((sunsetLocal - sunsetTm.tm_hour) * 60);
+    sunsetTm.tm_sec  = (int)((((sunsetLocal - sunsetTm.tm_hour) * 60) - sunsetTm.tm_min) * 60);
+    sunsetTime = mktime(&sunsetTm);
+  }
 
   DEBUG_PRINT("Sunrise: "); DEBUG_PRINTLN(sunsetTime);
 
@@ -1098,6 +1177,9 @@ void handleSaveWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, s
   credentials.password[passwordMaxSize - 1] = 0;
   EEPROM.put(0, credentials);
   EEPROM.commit();
+  request->send(200, "text/plain", "WiFi Saved");
+  connectToWiFi();
+  
 }
 
 void handleSetupDrivers(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -1109,9 +1191,14 @@ void handleSetupDrivers(AsyncWebServerRequest *request, uint8_t *data, size_t le
   }
 
   int stallValue = json["stall_value"] | -1;
+  int lowStallValue = json["low_stall_value"] | -1;
   int stallMinSpeed = json["stall_min_speed"] | -1;
   int maxSpeed = json["max_speed"] | -1;
   int acc = json["acceleration"] | -1;
+
+  if (lowStallValue >= 0 && lowStallValue <= 255) {
+    LOW_STALL_VALUE = lowStallValue;
+  }
 
   if (stallValue >= 0 && stallValue <= 255) {
     STALL_VALUE = stallValue;
@@ -1137,8 +1224,8 @@ void handleSetupDrivers(AsyncWebServerRequest *request, uint8_t *data, size_t le
 
   char response[100];
   snprintf(response, sizeof(response),
-           "STALL_VALUE = %d\nSTALL_MIN_SPEED = %d\nspeed = %d\nacceleration = %d",
-           STALL_VALUE, STALL_MIN_SPEED, speed, acceleration);
+           "STALL_VALUE = %d\nSTALL_MIN_SPEED = %d\nLOW_STALL_VALUE = %d\nspeed = %d\nacceleration = %d",
+           STALL_VALUE, STALL_MIN_SPEED, LOW_STALL_VALUE, speed, acceleration);
 
   request->send(200, "text/plain", response);
 }
@@ -1193,7 +1280,7 @@ void loop() {
     inaPeriod = 20000;
   }
 
-  // // AP auto-off after 10s if no clients
+  // // AP auto-off after 20s if no clients
   if (apModeEnabled && (currentMillis - apStartTime >= apTimeout)) {
     uint8_t connectedDevices = WiFi.softAPgetStationNum();
     if (connectedDevices == 0) {
@@ -1206,6 +1293,11 @@ void loop() {
   if (!timeSynced && isNTPReady()) {
     syncToNextMinute();  // Align to next HH:MM:00
     timeSynced = true;
+    for (uint8_t i = 0; i >2; i++) {
+      if (isZeroMoveTime(i) && isResetReason(i)) {
+        getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
+      }
+    }
   }
 
   if (!lowVoltage || serialDebug) {
