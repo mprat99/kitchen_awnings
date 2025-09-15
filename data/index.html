@@ -13,10 +13,16 @@
 
     <!-- Battery info -->
     <div class="top-info">
-      <span>Battery Voltage: <span id="batteryVoltage">-</span> V</span>&nbsp;&nbsp;|&nbsp;&nbsp;
-      <span>Battery Current: <span id="batteryCurrent">-</span> mA</span>&nbsp;&nbsp;|&nbsp;&nbsp;
-      <span>PV Current: <span id="pvCurrent">-</span> mA</span>
-    </div>
+    <span>Battery: <span id="batterySoC">-</span> %</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Capacity: <span id="currentCapacity_mAh">-</span> / 3300 mAh</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Charged Today: <span id="chargedToday">-</span> mAh</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Discharged Today: <span id="dischargedToday">-</span> mAh</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Battery Voltage: <span id="batteryVoltage">-</span> V</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Battery Current: <span id="batteryCurrent">-</span> mA</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>PV Current: <span id="pvCurrent">-</span> mA</span>&nbsp;&nbsp;|&nbsp;&nbsp;
+    <span>Load Current: <span id="loadCurrent">-</span> mA</span>
+  </div>
+
 
     <!-- Control buttons -->
     <div style="display: flex; justify-content: center;">
@@ -329,10 +335,14 @@
           const data = await response.json();
 
           // Update static info
-          document.getElementById("batteryVoltage").textContent = data.batteryVoltage.toFixed(2);
-          document.getElementById("batteryCurrent").textContent = data.batteryCurrent.toFixed(2);
-          document.getElementById("pvCurrent").textContent      = data.pvCurrent.toFixed(2);
-
+          document.getElementById("batteryVoltage").textContent   = data.batteryVoltage.toFixed(2);
+          document.getElementById("batteryCurrent").textContent   = data.batteryCurrent.toFixed(2);
+          document.getElementById("pvCurrent").textContent        = data.pvCurrent.toFixed(2);
+          document.getElementById("batterySoC").textContent       = data.batterySoC.toFixed(2);
+          document.getElementById("currentCapacity_mAh").textContent  = data.currentCapacity_mAh.toFixed(0);
+          document.getElementById("chargedToday").textContent  = data.chargedToday.toFixed(2);
+          document.getElementById("dischargedToday").textContent  = data.dischargedToday.toFixed(2);
+          document.getElementById("loadCurrent").textContent      = (data.pvCurrent - data.batteryCurrent).toFixed(2);
           raining = data.raining;
           updateRainStatus(raining);
 

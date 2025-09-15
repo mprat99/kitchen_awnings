@@ -223,6 +223,28 @@ float pvCurrent = 0.0f;
 float lowVoltageValue = 9.0f;
 bool lowVoltage = false;  // Battery under 9V
 bool chargerInitialized = false;
+bool socInitialized = false;
+
+// --- Voltage → SOC table for 3S Li-ion pack ---
+const int OCV_N = 15;
+const float ocv_pack_volts[OCV_N] = {
+  12.60, 12.45, 12.30, 12.15, 12.00,
+  11.85, 11.70, 11.55, 11.40, 11.25,
+  11.10, 10.80, 10.50,  9.90,  9.00
+};
+
+const float ocv_pack_soc[OCV_N] = {
+  100.0, 95.0, 90.0, 85.0, 80.0,
+   75.0, 70.0, 65.0, 60.0, 50.0,
+   40.0, 30.0, 20.0, 10.0,  0.0
+};
+
+// --- Global variables ---
+float batterySoC = 100.0;       // 0–100%
+float currentCapacity_mAh = 0.0;       // coulomb counter
+const float capacity_mAh = 3300.0; // battery nominal
+float chargedToday = 0.0f;
+float dischargedToday = 0.0f;
 
 bool serialDebug = false;
 
@@ -450,9 +472,13 @@ void configureServer() {
     float awning1Percent = 100.0f * ((float)stepper[1]->getCurrentPosition()) / ((float)windowHeight[1]);
     int dist0 = stepper[0]->targetPos() - stepper[0]->getCurrentPosition();
     int dist1 = stepper[1]->targetPos() - stepper[1]->getCurrentPosition();
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<512> doc;
     doc["batteryVoltage"]   = batteryVoltage;
     doc["batteryCurrent"]   = batteryCurrent;
+    doc["currentCapacity_mAh"]     = currentCapacity_mAh;
+    doc["batterySoC"]       = batterySoC;
+    doc["chargedToday"]     = chargedToday;
+    doc["dischargedToday"]  = dischargedToday;
     doc["pvCurrent"]        = pvCurrent;
     doc["pos0"]             = stepper[0]->getCurrentPosition();
     doc["pos1"]             = stepper[1]->getCurrentPosition();
@@ -463,10 +489,8 @@ void configureServer() {
     doc["homeFlag"]         = homeFlag;
     doc["raining"]          = !rainState;
 
-    char json[256];
+    char json[512];
     serializeJson(doc, json, sizeof(json));
-    request->send(200, "application/json", json);
-
     request->send(200, "application/json", json);
   });
 
@@ -534,7 +558,6 @@ void configureServer() {
   server.on(
     "/saveWifi", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      // request->send(200, "text/plain", "Data Saved");
     },
     NULL,
     handleSaveWifi);
@@ -542,7 +565,6 @@ void configureServer() {
   server.on(
     "/setupDrivers", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      // request->send(200, "text/plain", "Data Saved");
     },
     NULL,
     handleSetupDrivers);
@@ -550,7 +572,6 @@ void configureServer() {
   server.on(
     "/setupInas", HTTP_POST,
     [](AsyncWebServerRequest *request) {
-      // request->send(200, "text/plain", "Data Saved");
     },
     NULL,
     handleSetupInas);
@@ -730,10 +751,10 @@ void checkMotors() {
   for (uint8_t i = 0; i < 2; i++) {
 
     // Stall threshold adjustment
-    if (moveFlag[i] && !homeFlag && !restored_stall_value && abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) < 5000) {
+    if (moveFlag[i] && !homeFlag && !restored_stall_value && (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) < 5000 || stepper[i]->getCurrentPosition() > 5000)) {
       driver[i].SGTHRS(STALL_VALUE);
       restored_stall_value = true;
-    } else if (moveFlag[i] && !homeFlag && restored_stall_value && abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) > 5000) {
+    } else if (moveFlag[i] && !homeFlag && restored_stall_value && (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) > 5000 || stepper[i]->getCurrentPosition() < 5000)) {
       driver[i].SGTHRS(LOW_STALL_VALUE);
       restored_stall_value = false;
     }
@@ -755,7 +776,7 @@ void checkMotors() {
         currentPosition[i] = 0;
 
         // Phase 3: move slightly away from stall zone
-        targetPosition[i] = (i == 0) ? 2500 : -500;
+        targetPosition[i] = (i == 0) ? 3000 : -650;
         move(i);
         homingPhase[i] = 3;
       }
@@ -768,7 +789,7 @@ void checkMotors() {
           case 0: // Phase 0: pre-homing descent
             currentPosition[i] = downPosition[i];
             stepper[i]->setCurrentPosition(currentPosition[i]);
-            targetPosition[i] = (i == 0) ? currentPosition[i] + 4000 : currentPosition[i] - 4000;
+            targetPosition[i] = (i == 0) ? currentPosition[i] + 5000 : currentPosition[i] - 5000;
             move(i);
             homingPhase[i] = 1;
             break;
@@ -835,11 +856,80 @@ void inaTrigger() {
 
 void inaRead() {
   batteryVoltage = inaBat.getBusVoltage_V();
-  batteryCurrent = inaBat.getCurrent_mA();
-  pvCurrent = inaPV.getCurrent_mA();
+  batteryCurrent = - inaBat.getCurrent_mA();
+  pvCurrent = - inaPV.getCurrent_mA();
   lowVoltage = (batteryVoltage < lowVoltageValue);
+
+  float dt_s = (currentMillis - inaReadMillis) / 1000.0;
+  // update SoC
+  updateSoC(batteryVoltage, batteryCurrent, dt_s);
+
   inaMeasuring = false;
 }
+
+// --- Function to convert voltage to SoC (pack level) ---
+float voltageToSoC(float vpack) {
+  if (vpack >= ocv_pack_volts[0]) return ocv_pack_soc[0];
+  if (vpack <= ocv_pack_volts[OCV_N-1]) return ocv_pack_soc[OCV_N-1];
+  for (int i = 0; i < OCV_N - 1; i++) {
+    if (vpack <= ocv_pack_volts[i] && vpack > ocv_pack_volts[i+1]) {
+      float dv = ocv_pack_volts[i] - ocv_pack_volts[i+1];
+      float ds = ocv_pack_soc[i]   - ocv_pack_soc[i+1];
+      return ocv_pack_soc[i] - (ocv_pack_volts[i] - vpack) * ds / dv;
+    }
+  }
+  return 0.0;
+}
+
+// --- Main updateSoC function ---
+void updateSoC(float vpack, float current_mA, float dt_s) {
+
+  if (!socInitialized) {
+    float soc_voltage = voltageToSoC(vpack);
+    if (soc_voltage == 0.0) {
+      return;
+    }
+    currentCapacity_mAh = capacity_mAh * (soc_voltage / 100.0);
+    socInitialized = true;
+  }
+
+  // --- 1) Coulomb counting ---
+  float delta_mAh = current_mA * dt_s / 3600.0; // current in mA, dt in s
+  if (delta_mAh > 0) {
+    chargedToday += delta_mAh;
+  }
+  if (delta_mAh < 0) {
+    dischargedToday -= delta_mAh;
+  }
+
+  currentCapacity_mAh += delta_mAh;
+
+  if (abs(current_mA) < 1.0 and batteryVoltage > 13) {
+    currentCapacity_mAh = capacity_mAh;
+  }
+
+  // Clamp
+  if (currentCapacity_mAh < 0.0) currentCapacity_mAh = 0.0;
+  if (currentCapacity_mAh > capacity_mAh) currentCapacity_mAh = capacity_mAh;
+
+  float soc_coulomb = 100.0 * (currentCapacity_mAh / capacity_mAh);
+
+  // --- 2) Voltage-based SoC with IR compensation ---
+  const float R_internal = 0.18; // ohms, pack internal resistance (tune this)
+  float current_A = current_mA / 1000.0;
+  float OCV_est = vpack + current_A * R_internal; // V = Vpack + I*R
+
+  float soc_voltage = voltageToSoC(OCV_est);
+
+  // --- 3) Blend ---
+  const float alpha = 0.02; // 2% voltage correction
+  batterySoC = (1.0 - alpha) * soc_coulomb + alpha * soc_voltage;
+
+  // Clamp
+  if (batterySoC < 0.0) batterySoC = 0.0;
+  if (batterySoC > 100.0) batterySoC = 100.0;
+}
+
 
 
 // =======================
@@ -940,6 +1030,8 @@ void checkTime() {
   // ----- Calculate sunrise/sunset once per day -----
   if (!bootUpSunCheck || (!sunTimesCalculatedToday && currentHour == 0 && currentMinute == 0)) {
     calculateSunTimes();
+    chargedToday = 0.0f;
+    dischargedToday = 0.0f;
     bootUpSunCheck = true;
   }
   if (currentHour == 0 && currentMinute == 1) {
@@ -960,11 +1052,11 @@ void checkTime() {
     if (!rainFlag && currentHour == morningHour && currentMinute == morningMinute && !moveUpMorning) {
       for (uint8_t i = 0; i < 2; i++) {
         if (currentPosition[i] != 0) {
-          moveUpMorning = true;
           moveUp(i);
           positionReason[i] = "Scheduled Morning";
         }
       }
+      moveUpMorning = true;
     } else if (!rainFlag && currentHour == nightHour && currentMinute == nightMinute && !moveDownNight) {
       for (uint8_t i = 0; i < 2; i++) {
         moveDown(i);
