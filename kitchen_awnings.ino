@@ -6,13 +6,10 @@
 #include <ESPAsyncWebServer.h>
 #include <time.h>
 #include <ArduinoJson.h>
-// #include <Arduino.h>
 #include <FastAccelStepper.h>
 #include <TMCStepper.h>
 #include <EEPROM.h>
-// #include <string.h>
 #include <WiFiClient.h>
-// #include <esp_wifi.h>
 #include <Wire.h>
 #include <INA226_WE.h>
 #include "LittleFS.h"
@@ -64,7 +61,7 @@
 #define R_SENSE 0.11f   // TMC2209 sense resistor
 uint8_t STALL_VALUE = 60;  // StallGuard threshold
 uint8_t LOW_STALL_VALUE = 30;  // StallGuard threshold to avoid stall when no necessary to check
-uint32_t STALL_MIN_SPEED = 500;  // StallGuard threshold
+uint32_t STALL_MIN_SPEED = 400;  // StallGuard threshold
 
 
 HardwareSerial SerialTMC(2);  // UART2 for both drivers
@@ -88,7 +85,6 @@ uint32_t acceleration = 2000;  // in steps/s²
 
 // Enable pins (active LOW)
 int enablePin[] = { ENABLE0, ENABLE1 };
-// int stallPin[] = {STALL0, STALL1};
 
 // =======================
 // Motion Control Variables
@@ -96,7 +92,7 @@ int enablePin[] = { ENABLE0, ENABLE1 };
 volatile bool moveFlag[] = { false, false };
 bool homed[] = { false, false };
 uint8_t homingPhase[2] = {0, 0};
-
+unsigned long moveStartMillis[2] = {0, 0};
 
 int targetPosition[] = { 0, 0 };
 int currentPosition[] = { 0, 0 };
@@ -200,7 +196,7 @@ bool settingEnd[] = { false, false };
 
 // Independent stall flags (per motor)
 volatile bool stallFlag[] = { false, false };
-bool restored_stall_value = true;
+bool restored_stall_value[] = {true, true };
 
 // =======================
 // INA226 measurement
@@ -226,17 +222,39 @@ bool chargerInitialized = false;
 bool socInitialized = false;
 
 // --- Voltage → SOC table for 3S Li-ion pack ---
-const int OCV_N = 15;
+// const int OCV_N = 15;
+// const float ocv_pack_volts[OCV_N] = {
+//   12.60, 12.45, 12.30, 12.15, 12.00,
+//   11.85, 11.70, 11.55, 11.40, 11.25,
+//   11.10, 10.80, 10.50,  9.90,  9.00
+// };
+
+// const float ocv_pack_soc[OCV_N] = {
+//   100.0, 95.0, 90.0, 85.0, 80.0,
+//    75.0, 70.0, 65.0, 60.0, 50.0,
+//    40.0, 30.0, 20.0, 10.0,  0.0
+// };
+
+const int OCV_N = 31;
+
 const float ocv_pack_volts[OCV_N] = {
-  12.60, 12.45, 12.30, 12.15, 12.00,
-  11.85, 11.70, 11.55, 11.40, 11.25,
-  11.10, 10.80, 10.50,  9.90,  9.00
+  12.60, 12.55, 12.50, 12.45, 12.42,  // 100-80%
+  12.38, 12.35, 12.32, 12.28, 12.25,  // 78-60%
+  12.22, 12.18, 12.15, 12.10, 12.05,  // 58-40%
+  12.00, 11.95, 11.88, 11.80, 11.70,  // 38-20%
+  11.60, 11.48, 11.35, 11.20, 11.00,  // 18-4%
+  10.85, 10.65, 10.40, 10.15, 9.80,   // 3-0.4%
+  9.00                                  // 0%
 };
 
 const float ocv_pack_soc[OCV_N] = {
-  100.0, 95.0, 90.0, 85.0, 80.0,
-   75.0, 70.0, 65.0, 60.0, 50.0,
-   40.0, 30.0, 20.0, 10.0,  0.0
+  100.0, 97.0, 95.0, 92.0, 90.0,      // 100-90%
+  87.0, 85.0, 82.0, 78.0, 75.0,       // 87-75%
+  72.0, 68.0, 65.0, 62.0, 58.0,       // 72-58%
+  55.0, 52.0, 48.0, 45.0, 40.0,       // 55-40%
+  35.0, 30.0, 25.0, 20.0, 15.0,       // 35-15%
+  12.0, 8.0, 5.0, 2.0, 0.4,           // 12-0.4%
+  0.0                                   // 0%
 };
 
 // --- Global variables ---
@@ -245,6 +263,7 @@ float currentCapacity_mAh = 0.0;       // coulomb counter
 const float capacity_mAh = 3300.0; // battery nominal
 float chargedToday = 0.0f;
 float dischargedToday = 0.0f;
+float pvToday = 0.0f;
 
 bool serialDebug = false;
 
@@ -463,31 +482,28 @@ void configureServer() {
   server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request) {
     inaRead();
     lastAPIrequestMillis = currentMillis;
-    // if (batteryCurrent < 40.0f) {
-    //   R_SHUNT_BAT -= 0.001;
-    //   inaBat.setResistorRange(R_SHUNT_BAT, 4.0f);
-    // }
-
+    
     float awning0Percent = 100.0f * ((float)stepper[0]->getCurrentPosition()) / ((float)windowHeight[0]);
     float awning1Percent = 100.0f * ((float)stepper[1]->getCurrentPosition()) / ((float)windowHeight[1]);
     int dist0 = stepper[0]->targetPos() - stepper[0]->getCurrentPosition();
     int dist1 = stepper[1]->targetPos() - stepper[1]->getCurrentPosition();
     StaticJsonDocument<512> doc;
-    doc["batteryVoltage"]   = batteryVoltage;
-    doc["batteryCurrent"]   = batteryCurrent;
-    doc["currentCapacity_mAh"]     = currentCapacity_mAh;
-    doc["batterySoC"]       = batterySoC;
-    doc["chargedToday"]     = chargedToday;
-    doc["dischargedToday"]  = dischargedToday;
-    doc["pvCurrent"]        = pvCurrent;
-    doc["pos0"]             = stepper[0]->getCurrentPosition();
-    doc["pos1"]             = stepper[1]->getCurrentPosition();
-    doc["dist0"]            = dist0;
-    doc["dist1"]            = dist1;
-    doc["awning0Percent"]   = awning0Percent;
-    doc["awning1Percent"]   = awning1Percent;
-    doc["homeFlag"]         = homeFlag;
-    doc["raining"]          = !rainState;
+    doc["batteryVoltage"]      = batteryVoltage;
+    doc["batteryCurrent"]      = batteryCurrent;
+    doc["currentCapacity_mAh"] = currentCapacity_mAh;
+    doc["batterySoC"]          = batterySoC;
+    doc["chargedToday"]        = chargedToday;
+    doc["dischargedToday"]     = dischargedToday;
+    doc["pvToday"]             = pvToday;
+    doc["pvCurrent"]           = pvCurrent;
+    doc["pos0"]                = stepper[0]->getCurrentPosition();
+    doc["pos1"]                = stepper[1]->getCurrentPosition();
+    doc["dist0"]               = dist0;
+    doc["dist1"]               = dist1;
+    doc["awning0Percent"]      = awning0Percent;
+    doc["awning1Percent"]      = awning1Percent;
+    doc["homeFlag"]            = homeFlag;
+    doc["raining"]             = !rainState;
 
     char json[512];
     serializeJson(doc, json, sizeof(json));
@@ -499,19 +515,19 @@ void configureServer() {
     
   StaticJsonDocument<512> doc;  // adjust size if you add more fields
 
-  doc["currentHour"]        = currentHour;
-  doc["currentMinute"]      = currentMinute;
-  doc["currentSecond"]      = currentSecond;
-  doc["moveUpMorning"]      = moveUpMorning;
-  doc["moveDownNight"]      = moveDownNight;
-  doc["automaticDayNight"]  = scheduledAwnings;
-  doc["morningHour"]        = morningHour;
-  doc["morningMinute"]      = morningMinute;
-  doc["nightHour"]          = nightHour;
-  doc["nightMinute"]        = nightMinute;
-  doc["rainSensorEnabled"]  = rainSensorEnabled;
-  doc["output12VEnabled"]   = !digitalRead(OUTPUT_12V_EN);
-  doc["solarChargerEnabled"]= solarChargerEnabled;
+  doc["currentHour"]         = currentHour;
+  doc["currentMinute"]       = currentMinute;
+  doc["currentSecond"]       = currentSecond;
+  doc["moveUpMorning"]       = moveUpMorning;
+  doc["moveDownNight"]       = moveDownNight;
+  doc["automaticDayNight"]   = scheduledAwnings;
+  doc["morningHour"]         = morningHour;
+  doc["morningMinute"]       = morningMinute;
+  doc["nightHour"]           = nightHour;
+  doc["nightMinute"]         = nightMinute;
+  doc["rainSensorEnabled"]   = rainSensorEnabled;
+  doc["output12VEnabled"]    = !digitalRead(OUTPUT_12V_EN);
+  doc["solarChargerEnabled"] = solarChargerEnabled;
 
   char sunriseBuf[16];
   snprintf(sunriseBuf, sizeof(sunriseBuf), "%sh", sunriseStr);
@@ -652,21 +668,7 @@ void disableOutput12V() {
   }
 }
 
-// =======================
-// Replace home() function
-// =======================
-// void home() {
-//   homeFlag = true;
-//   for (uint8_t i = 0; i < 2; i++) {
-//     homed[i] = false;
-//     moveFlag[i] = true;
-//     stepper[i]->setSpeedInHz(speed/2);
-//     int offset = (i == 0) ? -10000 : 10000;
-//     currentPosition[i] = maxPosition[i] + offset;
-//     targetPosition[i] = maxPosition[i];
-//     move(i);
-//   }
-// }
+
 void home() {
   homeFlag = true;
   for (uint8_t i = 0; i < 2; i++) {
@@ -737,53 +739,61 @@ void moveDown(uint8_t i) {
 
 void move(uint8_t i) {
   if (digitalRead(OUTPUT_12V_EN) == HIGH) {
-    enableOutput12V();
+            enableOutput12V();
     delay(50);
   }
   setupDrivers();
+  if (!homeFlag) {
+    driver[i].SGTHRS(LOW_STALL_VALUE);
+    restored_stall_value[i] = false;
+  }
   moveFlag[i] = true;
   stepper[i]->setCurrentPosition(currentPosition[i]);
   stepper[i]->moveTo(targetPosition[i]);
   getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
+  moveStartMillis[i] = millis();
 }
 
 void checkMotors() {
-  for (uint8_t i = 0; i < 2; i++) {
+    for (uint8_t i = 0; i < 2; i++) {
 
-    // Stall threshold adjustment
-    if (moveFlag[i] && !homeFlag && !restored_stall_value && (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) < 5000 || stepper[i]->getCurrentPosition() > 5000)) {
-      driver[i].SGTHRS(STALL_VALUE);
-      restored_stall_value = true;
-    } else if (moveFlag[i] && !homeFlag && restored_stall_value && (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) > 5000 || stepper[i]->getCurrentPosition() < 5000)) {
-      driver[i].SGTHRS(LOW_STALL_VALUE);
-      restored_stall_value = false;
-    }
+      // --- Stall threshold adjustment ---
+      if (moveFlag[i] && !homeFlag && !restored_stall_value[i] &&
+          (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) < 5000 ||
+            stepper[i]->getCurrentPosition() > 5000)) {
+          driver[i].SGTHRS(STALL_VALUE);
+          restored_stall_value[i] = true;
+      } 
+      // else if (moveFlag[i] && !homeFlag && restored_stall_value &&
+      //             (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) > 5000 ||
+      //             stepper[i]->getCurrentPosition() < 5000)) {
+      //     driver[i].SGTHRS(LOW_STALL_VALUE);
+      //     restored_stall_value = false;
+      // }
 
     // Handle stall detection
-    if (stallFlag[i]) {
-      stepper[i]->forceStop();
-      stallFlag[i] = false;
+      if (stallFlag[i]) {
+        stepper[i]->forceStop();
+        stallFlag[i] = false;
 
-      if (i == 0) {
-        attachInterrupt(digitalPinToInterrupt(STALL0), stallDetected0, RISING);
-      } else {
-        attachInterrupt(digitalPinToInterrupt(STALL1), stallDetected1, RISING);
+        attachInterrupt(i==0 ? digitalPinToInterrupt(STALL0) : digitalPinToInterrupt(STALL1),
+                        i==0 ? stallDetected0 : stallDetected1,
+                        RISING);
+
+        // Stall during Phase 2 means we've hit home
+        if (homeFlag && homingPhase[i] == 2) {
+          stepper[i]->setCurrentPosition(0);
+          currentPosition[i] = 0;
+
+          // Phase 3: move slightly away from stall zone
+          targetPosition[i] = (i == 0) ? 3000 : -650;
+          move(i);
+          homingPhase[i] = 3;
+        }
       }
-
-      // Stall during Phase 2 means we've hit home
-      if (homeFlag && homingPhase[i] == 2) {
-        stepper[i]->setCurrentPosition(0);
-        currentPosition[i] = 0;
-
-        // Phase 3: move slightly away from stall zone
-        targetPosition[i] = (i == 0) ? 3000 : -650;
-        move(i);
-        homingPhase[i] = 3;
-      }
-    }
 
     // Homing logic
-    if (moveFlag[i] && !stepper[i]->isRunning()) {
+    if (moveFlag[i] && !stepper[i]->isRunning() && currentMillis - moveStartMillis[i] > 20) {
       if (homeFlag) {
         switch (homingPhase[i]) {
           case 0: // Phase 0: pre-homing descent
@@ -808,19 +818,19 @@ void checkMotors() {
             stepper[i]->setCurrentPosition(currentPosition[i]);
             stepper[i]->setSpeedInHz(speed);
             if (homed[0] && homed[1]) {
-              homeFlag = false;
-              initialHome = true;
+                homeFlag = false;
+                initialHome = true;
             }
             break;
         }
       } else {
         moveFlag[i] = false;
-      }
+        }
 
-      currentPosition[i] = stepper[i]->getCurrentPosition();
-      disableOutput12V();
+        currentPosition[i] = stepper[i]->getCurrentPosition();
+        disableOutput12V();
+        }
     }
-  }
 }
 
 // =======================
@@ -850,7 +860,6 @@ void inaTrigger() {
   inaBat.startSingleMeasurement();
   inaPV.startSingleMeasurement();
   inaTriggerMillis = currentMillis;
-  inaReadMillis = currentMillis;
   inaMeasuring = true;
 }
 
@@ -861,9 +870,15 @@ void inaRead() {
   lowVoltage = (batteryVoltage < lowVoltageValue);
 
   float dt_s = (currentMillis - inaReadMillis) / 1000.0;
+
+  if (pvCurrent > 0) {
+    float delta_pv_mAh = pvCurrent * dt_s / 3600.0;
+    pvToday += delta_pv_mAh;
+  }
+  
   // update SoC
   updateSoC(batteryVoltage, batteryCurrent, dt_s);
-
+  inaReadMillis = currentMillis;
   inaMeasuring = false;
 }
 
@@ -1032,6 +1047,7 @@ void checkTime() {
     calculateSunTimes();
     chargedToday = 0.0f;
     dischargedToday = 0.0f;
+    pvToday = 0.0f;
     bootUpSunCheck = true;
   }
   if (currentHour == 0 && currentMinute == 1) {
@@ -1383,9 +1399,9 @@ void loop() {
   }
 
   if (!timeSynced && isNTPReady()) {
-    syncToNextMinute();  // Align to next HH:MM:00
+    checkTime();  // Align to next HH:MM:00
     timeSynced = true;
-    for (uint8_t i = 0; i >2; i++) {
+    for (uint8_t i = 0; i < 2; i++) {
       if (isZeroMoveTime(i) && isResetReason(i)) {
         getMoveTimeString(moveTimeStr[i], sizeof(moveTimeStr[i]));
       }
