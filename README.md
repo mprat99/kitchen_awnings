@@ -6,6 +6,13 @@ Welcome to the Kitchen Awnings repository — a multidisciplinary IoT project th
 
 This repository contains the Arduino code for an ESP32-based controller that automates and remotely manages kitchen awnings. Designed for energy efficiency and responsive automation, the system integrates sensorless motor control, weather-based behavior, and a web interface for seamless user interaction.
 
+## 📸 Screenshots
+
+Below are examples of the embedded web portal used to control and configure the kitchen awnings:
+
+![Screenshot1](screenshot1.png)
+![Screenshot2](screenshot2.png)
+
 ## 🎯 Features
 
 - **Remote Control**: Operate awnings with `Up`, `Down`, and `Stop` commands via a hosted web interface or API calls.
@@ -54,10 +61,15 @@ The ESP32 serves a lightweight webpage for manual control and scheduling. You ca
 
 ## ⚡ Getting Started
 
-1. Flash the `kitchen_awnings.ino` to your ESP32 using the Arduino IDE or PlatformIO.
-2. Upload the `data/` folder to LittleFS using the appropriate uploader tool.
-3. Connect the ESP32 to your Wi-Fi network.
-4. Access the web interface via the device’s IP address.
+1. Flash the `kitchen_awnings.ino` to your ESP32 using the Arduino IDE or PlatformIO.  
+2. Upload the `data/` folder to LittleFS using the appropriate uploader tool.  
+3. Within 20 seconds of powering on the ESP32, connect to the Wi-Fi access point it creates.  
+   - SSID: `Kitchen Awnings`  
+   - Password: `Croquets`  
+   - If not connected within 20 seconds, the access point will deactivate and you'll need to reboot the ESP-32.  
+   - Once connected, navigate to [192.168.4.1](http://192.168.4.1), scroll down, and enter your Wi-Fi SSID and password to complete setup.  
+4. After configuration, access the web interface via the device’s IP address on your local network, by default fixed at 192.168.1.155, you can change it on the code.
+
 
 ## 📅 Future Improvements
 
