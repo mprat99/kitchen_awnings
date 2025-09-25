@@ -6,13 +6,6 @@ Welcome to the Kitchen Awnings repository — a multidisciplinary IoT project th
 
 This repository contains the Arduino code for an ESP32-based controller that automates and remotely manages kitchen awnings. Designed for energy efficiency and responsive automation, the system integrates sensorless motor control, weather-based behavior, and a web interface for seamless user interaction.
 
-## 📸 Screenshots
-
-Below are examples of the embedded web portal used to control and configure the kitchen awnings:
-
-![Screenshot1](screenshot1.png)
-![Screenshot2](screenshot2.png)
-
 ## 🎯 Features
 
 - **Remote Control**: Operate awnings with `Up`, `Down`, and `Stop` commands via a hosted web interface or API calls.
@@ -47,6 +40,15 @@ Below are examples of the embedded web portal used to control and configure the 
 ## 🌐 Web Interface
 
 The ESP32 serves a lightweight webpage for manual control and scheduling. You can also interact with the system programmatically via RESTful API endpoints.
+
+## 📸 Screenshots
+
+Below are examples of the embedded web portal used to control and configure the kitchen awnings:
+
+<img src="screenshot1.png" alt="Electric data and Remote Control" width="30%"/>
+
+<img src="screenshot2.png" alt="Scheduling & Configuration" width="30%"/>
+
 
 ## 📁 File Structure
 
