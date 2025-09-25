@@ -90,6 +90,7 @@ int enablePin[] = { ENABLE0, ENABLE1 };
 // Motion Control Variables
 // =======================
 volatile bool moveFlag[] = { false, false };
+volatile bool interruptAttached[2] = {true, true};
 bool homed[] = { false, false };
 uint8_t homingPhase[2] = {0, 0};
 unsigned long moveStartMillis[2] = {0, 0};
@@ -675,6 +676,7 @@ void home() {
     if (stepper[i]->isRunning()) {
       stepper[i]->stopMove();
     }
+
     homed[i] = false;
     moveFlag[i] = true;
     homingPhase[i] = 0;  // Start at phase 0
@@ -738,6 +740,9 @@ void moveDown(uint8_t i) {
 }
 
 void move(uint8_t i) {
+  detachInterrupt(digitalPinToInterrupt(i == 0 ? STALL0 : STALL1));
+  interruptAttached[i] = false;
+  
   if (digitalRead(OUTPUT_12V_EN) == HIGH) {
             enableOutput12V();
     delay(50);
@@ -757,6 +762,14 @@ void move(uint8_t i) {
 void checkMotors() {
     for (uint8_t i = 0; i < 2; i++) {
 
+      if (moveFlag[i] && (currentMillis - moveStartMillis[i] > 200)) {
+            if (!interruptAttached[i]) {
+                attachInterrupt(i == 0 ? digitalPinToInterrupt(STALL0) : digitalPinToInterrupt(STALL1),
+                               i == 0 ? stallDetected0 : stallDetected1,
+                               RISING);
+                interruptAttached[i] = true;
+            }
+        }
       // --- Stall threshold adjustment ---
       if (moveFlag[i] && !homeFlag && !restored_stall_value[i] &&
           (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) < 5000 ||
@@ -764,21 +777,11 @@ void checkMotors() {
           driver[i].SGTHRS(STALL_VALUE);
           restored_stall_value[i] = true;
       } 
-      // else if (moveFlag[i] && !homeFlag && restored_stall_value &&
-      //             (abs(stepper[i]->targetPos() - stepper[i]->getCurrentPosition()) > 5000 ||
-      //             stepper[i]->getCurrentPosition() < 5000)) {
-      //     driver[i].SGTHRS(LOW_STALL_VALUE);
-      //     restored_stall_value = false;
-      // }
 
     // Handle stall detection
       if (stallFlag[i]) {
         stepper[i]->forceStop();
         stallFlag[i] = false;
-
-        attachInterrupt(i==0 ? digitalPinToInterrupt(STALL0) : digitalPinToInterrupt(STALL1),
-                        i==0 ? stallDetected0 : stallDetected1,
-                        RISING);
 
         // Stall during Phase 2 means we've hit home
         if (homeFlag && homingPhase[i] == 2) {
